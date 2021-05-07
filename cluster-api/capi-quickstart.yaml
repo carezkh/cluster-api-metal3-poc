@@ -1,0 +1,209 @@
+apiVersion: cluster.x-k8s.io/v1alpha3
+kind: Cluster
+metadata:
+  name: capi-quickstart
+  namespace: default
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+      - 192.168.0.0/24
+    services:
+      cidrBlocks:
+      - 10.96.0.0/12
+  controlPlaneRef:
+    apiVersion: controlplane.cluster.x-k8s.io/v1alpha3
+    kind: KubeadmControlPlane
+    name: capi-quickstart
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1alpha4
+    kind: Metal3Cluster
+    name: capi-quickstart
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha4
+kind: Metal3Cluster
+metadata:
+  name: capi-quickstart
+  namespace: default
+spec:
+  controlPlaneEndpoint:
+    host: 192.168.122.2
+    port: 6443
+  noCloudProvider: true
+---
+apiVersion: controlplane.cluster.x-k8s.io/v1alpha3
+kind: KubeadmControlPlane
+metadata:
+  name: capi-quickstart
+  namespace: default
+spec:
+  infrastructureTemplate:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1alpha4
+    kind: Metal3MachineTemplate
+    name: capi-quickstart-controlplane
+  kubeadmConfigSpec:
+    files:
+    - content: |
+        overlay
+        br_netfilter
+      path: /etc/modules-load.d/k8s.conf
+    - content: |
+        net.ipv4.ip_forward                 = 1
+        net.bridge.bridge-nf-call-iptables  = 1
+        net.bridge.bridge-nf-call-ip6tables = 1
+      path: /etc/sysctl.d/k8s.conf
+    - content: |
+        [kubernetes]
+        name=Kubernetes
+        baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-$basearch
+        enabled=1
+        gpgcheck=1
+        repo_gpgcheck=1
+        gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+        exclude=kubelet kubeadm kubectl
+      path: /etc/yum.repos.d/kubernetes.repo
+    initConfiguration:
+      nodeRegistration:
+        kubeletExtraArgs:
+          node-labels: metal3.io/uuid={{ ds.meta_data.uuid }}
+        name: '{{ ds.meta_data.name }}'
+    joinConfiguration:
+      controlPlane: {}
+      nodeRegistration:
+        kubeletExtraArgs:
+          node-labels: metal3.io/uuid={{ ds.meta_data.uuid }}
+        name: '{{ ds.meta_data.name }}'
+    preKubeadmCommands:
+    - sudo sh -xc "while ! yum install -y yum-utils ; do sleep 1 ; done ; echo succeed"
+    - sudo sh -xc " while ! yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo ; do sleep 1 ; done ; echo succeed"
+    - sudo sh -xc "while ! yum install -y docker-ce-20.10.6 docker-ce-cli-20.10.6 containerd.io-1.4.4 ; do sleep 1 ; done ; echo succeed"
+    - sudo sh -c "containerd config default > /etc/containerd/config.toml"
+    - sudo sed -i '/runc.options]/aSystemdCgroup = true' /etc/containerd/config.toml
+    - sudo systemctl enable --now docker containerd
+    - sudo setenforce 0
+    - sudo sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
+    - sudo sh -xc "while ! yum install -y kubelet-1.21.0-0.x86_64 kubeadm-1.21.0-0.x86_64 kubectl-1.21.0-0.x86_64 --disableexcludes=kubernetes ; do sleep 1 ; done ; echo succeed"
+    - sudo systemctl enable --now kubelet
+    users:
+    - lockPassword: false
+      name: metal3
+      sshAuthorizedKeys:
+      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDTkk70CQwEIo8DHQSubfavVKHR8M+pDSqrEUMbRoZRtBO1xTk8C/enSNo4TJ3jYWf6037QXqCj8HhBIw/GPKyKicAhwq2yG8iBgfg4ngHsuJ8+T5iTxMzI+gjl0UcnrSlakThYIWzXN287x71BbSqTypZhmIdRTyD8g6UD0PVOrI+dtPBQOeAipx1iRze1NQjHHjv1Fb2CEgjM2hMYFKLxXJs050ntrlJ7rBEOe/ZS7QyE34KBcOWDbfuU51daxpWPiP/NsZOKaP4EmdvBIkvtZDaHBk38s/+XyKo/rcNiyysZwQMMAV7tEQfl+VMKffbsv1umPXYezdjuRyMJo1s1ItxGtIMuscgzLMxmP4x1cqtGbUkzSnAHTOWgRdMUIgz29bdSQVcG4/zN/Z5FAC40YHnbn+FprXtDTWFOOf/CUJfZN4qS2P32cf82KD2Y0Km4ygBNW/GtjM9g9cHhj6yNniWbwbGQAusKVGVFuDEJnw/XYttVLjUphaRAflVEq20= root@metal3
+      sudo: ALL=(ALL) NOPASSWD:ALL
+  replicas: 1
+  version: v1.21.0
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha4
+kind: Metal3MachineTemplate
+metadata:
+  name: capi-quickstart-controlplane
+  namespace: default
+spec:
+  template:
+    spec:
+      hostSelector:
+        matchLabels:
+          bmh: metal3-0
+      image:
+        checksum: http://192.168.122.1:8080/centos7.qcow2.CHECKSUMS
+        checksumType: md5
+        format: qcow2
+        url: http://192.168.122.1:8080/centos7.qcow2
+---
+apiVersion: cluster.x-k8s.io/v1alpha3
+kind: MachineDeployment
+metadata:
+  labels:
+    cluster.x-k8s.io/cluster-name: capi-quickstart
+    nodepool: nodepool-0
+  name: capi-quickstart
+  namespace: default
+spec:
+  clusterName: capi-quickstart
+  replicas: 1
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: capi-quickstart
+      nodepool: nodepool-0
+  template:
+    metadata:
+      labels:
+        cluster.x-k8s.io/cluster-name: capi-quickstart
+        nodepool: nodepool-0
+    spec:
+      bootstrap:
+        configRef:
+          apiVersion: bootstrap.cluster.x-k8s.io/v1alpha3
+          kind: KubeadmConfigTemplate
+          name: capi-quickstart-workers
+      clusterName: capi-quickstart
+      infrastructureRef:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1alpha4
+        kind: Metal3MachineTemplate
+        name: capi-quickstart-workers
+      version: v1.21.0
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha4
+kind: Metal3MachineTemplate
+metadata:
+  name: capi-quickstart-workers
+  namespace: default
+spec:
+  template:
+    spec:
+      image:
+        checksum: http://192.168.122.1:8080/centos7.qcow2.CHECKSUMS
+        checksumType: md5
+        format: qcow2
+        url: http://192.168.122.1:8080/centos7.qcow2
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1alpha3
+kind: KubeadmConfigTemplate
+metadata:
+  name: capi-quickstart-workers
+  namespace: default
+spec:
+  template:
+    spec:
+      joinConfiguration:
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: metal3.io/uuid={{ ds.meta_data.uuid }}
+          name: '{{ ds.meta_data.name }}'
+      users:
+      - lockPassword: false
+        name: metal3
+        sshAuthorizedKeys:
+        - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDTkk70CQwEIo8DHQSubfavVKHR8M+pDSqrEUMbRoZRtBO1xTk8C/enSNo4TJ3jYWf6037QXqCj8HhBIw/GPKyKicAhwq2yG8iBgfg4ngHsuJ8+T5iTxMzI+gjl0UcnrSlakThYIWzXN287x71BbSqTypZhmIdRTyD8g6UD0PVOrI+dtPBQOeAipx1iRze1NQjHHjv1Fb2CEgjM2hMYFKLxXJs050ntrlJ7rBEOe/ZS7QyE34KBcOWDbfuU51daxpWPiP/NsZOKaP4EmdvBIkvtZDaHBk38s/+XyKo/rcNiyysZwQMMAV7tEQfl+VMKffbsv1umPXYezdjuRyMJo1s1ItxGtIMuscgzLMxmP4x1cqtGbUkzSnAHTOWgRdMUIgz29bdSQVcG4/zN/Z5FAC40YHnbn+FprXtDTWFOOf/CUJfZN4qS2P32cf82KD2Y0Km4ygBNW/GtjM9g9cHhj6yNniWbwbGQAusKVGVFuDEJnw/XYttVLjUphaRAflVEq20= root@metal3
+        sudo: ALL=(ALL) NOPASSWD:ALL
+      files:
+      - content: |
+          overlay
+          br_netfilter
+        path: /etc/modules-load.d/k8s.conf
+      - content: |
+          net.ipv4.ip_forward                 = 1
+          net.bridge.bridge-nf-call-iptables  = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+        path: /etc/sysctl.d/k8s.conf
+      - content: |
+          [kubernetes]
+          name=Kubernetes
+          baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-$basearch
+          enabled=1
+          gpgcheck=1
+          repo_gpgcheck=1
+          gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+          exclude=kubelet kubeadm kubectl
+        path: /etc/yum.repos.d/kubernetes.repo
+      preKubeadmCommands:
+      - sudo sh -xc "while ! yum install -y yum-utils ; do sleep 1 ; done ; echo succeed"
+      - sudo sh -xc " while ! yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo ; do sleep 1 ; done ; echo succeed"
+      - sudo sh -xc "while ! yum install -y docker-ce-20.10.6 docker-ce-cli-20.10.6 containerd.io-1.4.4 ; do sleep 1 ; done ; echo succeed"
+      - sudo sh -c "containerd config default > /etc/containerd/config.toml"
+      - sudo sed -i '/runc.options]/aSystemdCgroup = true' /etc/containerd/config.toml
+      - sudo systemctl enable --now docker containerd
+      - sudo setenforce 0
+      - sudo sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
+      - sudo sh -xc "while ! yum install -y kubelet-1.21.0-0.x86_64 kubeadm-1.21.0-0.x86_64 kubectl-1.21.0-0.x86_64 --disableexcludes=kubernetes ; do sleep 1 ; done ; echo succeed"
+      - sudo systemctl enable --now kubelet

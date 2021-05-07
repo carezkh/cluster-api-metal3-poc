@@ -1,0 +1,50 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: baremetal-0
+type: Opaque
+data:
+  username: YWRtaW4=
+  password: cGFzc3dvcmQ=
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: baremetal-1
+type: Opaque
+data:
+  username: YWRtaW4=
+  password: cGFzc3dvcmQ=
+---
+apiVersion: metal3.io/v1alpha1
+kind: BareMetalHost
+metadata:
+  name: metal3-0
+  labels:
+    bmh: metal3-0
+spec:
+  online: true
+  bmc:
+    address: ipmi://192.168.122.1:623
+    credentialsName: baremetal-0
+  bootMACAddress: 52:54:00:4a:c1:73
+  bootMode: legacy
+  rootDeviceHints: 
+    deviceName: /dev/vda
+---
+apiVersion: metal3.io/v1alpha1
+kind: BareMetalHost
+metadata:
+  name: metal3-1
+  labels:
+    bmh: metal3-1
+spec:
+  online: true
+  bmc:
+    address: ipmi://192.168.122.1:624
+    credentialsName: baremetal-1
+  bootMACAddress: 52:54:00:12:7c:3a
+  bootMode: legacy
+  rootDeviceHints: 
+    deviceName: /dev/vda
